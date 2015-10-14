@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>IDESourceControlProjectFavoriteDictionaryKey</key>
+	<false/>
+	<key>IDESourceControlProjectIdentifier</key>
+	<string>8884FBEF-81CF-4EC2-9B11-03E6AEE08A0F</string>
+	<key>IDESourceControlProjectName</key>
+	<string>raytrace</string>
+	<key>IDESourceControlProjectOriginsDictionary</key>
+	<dict>
+		<key>69931E98E401397C86CF073E0E0CAF5F5A16B961</key>
+		<string>bitbucket.org:xelatihy/graphics14.git</string>
+		<key>E25DB4D5599066D1CCA89B52FDAAC8CD83A71C74</key>
+		<string>ssh://bitbucket.org/xelatihy/graphics13.git</string>
+	</dict>
+	<key>IDESourceControlProjectPath</key>
+	<string>assignments/01_raytrace/sol/raytrace.xcodeproj</string>
+	<key>IDESourceControlProjectRelativeInstallPathDictionary</key>
+	<dict>
+		<key>69931E98E401397C86CF073E0E0CAF5F5A16B961</key>
+		<string>../../../../..</string>
+		<key>E25DB4D5599066D1CCA89B52FDAAC8CD83A71C74</key>
+		<string>../../../../../../graphics13</string>
+	</dict>
+	<key>IDESourceControlProjectURL</key>
+	<string>bitbucket.org:xelatihy/graphics14.git</string>
+	<key>IDESourceControlProjectVersion</key>
+	<integer>111</integer>
+	<key>IDESourceControlProjectWCCIdentifier</key>
+	<string>69931E98E401397C86CF073E0E0CAF5F5A16B961</string>
+	<key>IDESourceControlProjectWCConfigurations</key>
+	<array>
+		<dict>
+			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
+			<string>public.vcs.git</string>
+			<key>IDESourceControlWCCIdentifierKey</key>
+			<string>E25DB4D5599066D1CCA89B52FDAAC8CD83A71C74</string>
+			<key>IDESourceControlWCCName</key>
+			<string>graphics13</string>
+		</dict>
+		<dict>
+			<key>IDESourceControlRepositoryExtensionIdentifierKey</key>
+			<string>public.vcs.git</string>
+			<key>IDESourceControlWCCIdentifierKey</key>
+			<string>69931E98E401397C86CF073E0E0CAF5F5A16B961</string>
+			<key>IDESourceControlWCCName</key>
+			<string>graphics14</string>
+		</dict>
+	</array>
+</dict>
+</plist>

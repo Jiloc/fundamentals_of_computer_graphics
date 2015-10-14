@@ -1,0 +1,9 @@
+{
+    "camera": { "frame": { "o": [0,0,2.5] } },
+    "surfaces": [
+        { "isquad": true, "material": { "kd": [1,1,1], "ks": [0,0,0], "n": 100 } }
+    ],
+    "lights": [
+        { "frame": { "o": [0,0,5] }, "intensity": [10,10,10] }
+    ]
+}
