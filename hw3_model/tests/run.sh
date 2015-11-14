@@ -1,0 +1,9 @@
+../bin/model 01_spline.json
+../bin/model 02_hair.json
+../bin/model 03_subdivcube.json
+../bin/model 04_subdivmonkey.json
+../bin/model 05_textured.json
+../bin/model 06_bumped.json
+../bin/model 07_shuttle.json
+../bin/model 08_head.json
+../bin/model 09_sibenik.json
