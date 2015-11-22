@@ -3,6 +3,7 @@
 #include "scene.h"
 #include "image.h"
 #include "tesselation.h"
+#include "animation.h"
 
 #include <cstdio>
 
@@ -17,8 +18,8 @@ struct ShadeState {
 // initialize the shaders
 void init_shaders(ShadeState* state) {
     // load shader code from files
-    auto vertex_shader_code = load_text_file("model_vertex.glsl");
-    auto fragment_shader_code = load_text_file("model_fragment.glsl");
+    auto vertex_shader_code = load_text_file("animate_vertex.glsl");
+    auto fragment_shader_code = load_text_file("animate_fragment.glsl");
     auto vertex_shader_codes = (char *)vertex_shader_code.c_str();
     auto fragment_shader_codes = (char *)fragment_shader_code.c_str();
 
@@ -50,6 +51,8 @@ void init_shaders(ShadeState* state) {
     glBindAttribLocation(state->gl_program_id, 0, "vertex_pos");
     glBindAttribLocation(state->gl_program_id, 1, "vertex_norm");
     glBindAttribLocation(state->gl_program_id, 2, "vertex_texcoord");
+    glBindAttribLocation(state->gl_program_id, 3, "vertex_skin_bones");
+    glBindAttribLocation(state->gl_program_id, 4, "vertex_skin_weights");
 
     // link program
     glLinkProgram(state->gl_program_id);
@@ -61,66 +64,139 @@ void init_shaders(ShadeState* state) {
 
 // initialize the textures
 void init_textures(Scene* scene, ShadeState* state) {
-    // YOUR CODE GOES HERE ---------------------
     // grab textures from scene
-    vector<image3f*> textures = get_textures(scene);
+    auto textures = get_textures(scene);
     // foreach texture
-    for (image3f* texture: textures){
+    for(auto texture : textures) {
         // if already in the state->gl_texture_id map, skip
-        auto txt = state->gl_texture_id.find(texture);
-        if (txt->first == texture){
-            continue;
-        }
+        if(state->gl_texture_id.find(texture) != state->gl_texture_id.end()) continue;
         // gen texture id
-        GLuint texture_id;
-        glGenTextures(1, &texture_id);
-
+        unsigned int id = 0;
+        glGenTextures(1, &id);
         // set id to the state->gl_texture_id map for later use
-        state->gl_texture_id.insert(pair<image3f*, int>(texture, texture_id));
-
+        state->gl_texture_id[texture] = id;
         // bind texture
-        glBindTexture(GL_TEXTURE_2D, texture_id);
-
+        glBindTexture(GL_TEXTURE_2D, id);
         // set texture filtering parameters
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
         glTexParameteri(GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_TRUE);
-
         // load texture data
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture->width(), texture->height(), 0, GL_RGB, GL_FLOAT, texture->data());
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA,
+                     texture->width(), texture->height(),
+                     0, GL_RGB, GL_FLOAT, texture->data());
     }
 }
 
 // utility to bind texture parameters for shaders
 // uses texture name, texture_on name, texture pointer and texture unit position
 void _bind_texture(string name_map, string name_on, image3f* txt, int pos, ShadeState* state) {
-    // YOUR CODE GOES HERE ---------------------
     // if txt is not null
-    if (txt != nullptr)
-    {
+    if(txt) {
         // set texture on boolean parameter to true
-        glUniform1f(glGetUniformLocation(state->gl_program_id, name_on.c_str()), GL_TRUE);
-
+        glUniform1i(glGetUniformLocation(state->gl_program_id,name_on.c_str()),GL_TRUE);
         // activate a texture unit at position pos
-        glActiveTexture(GL_TEXTURE0 + pos);
-
+        glActiveTexture(GL_TEXTURE0+pos);
         // bind texture object to it from state->gl_texture_id map
         glBindTexture(GL_TEXTURE_2D, state->gl_texture_id[txt]);
-
         // set texture parameter to the position pos
         glUniform1i(glGetUniformLocation(state->gl_program_id, name_map.c_str()), pos);
-    }
-
-    // else
-    else {
+    } else {
         // set texture on boolean parameter to false
-        glUniform1f(glGetUniformLocation(state->gl_program_id, name_on.c_str()), GL_FALSE);
-
+        glUniform1i(glGetUniformLocation(state->gl_program_id,name_on.c_str()),GL_FALSE);
         // activate a texture unit at position pos
-        glActiveTexture(GL_TEXTURE0 + pos);
-        
+        glActiveTexture(GL_TEXTURE0+pos);
         // set zero as the texture id
-        glUniform1i(glGetUniformLocation(state->gl_program_id, name_map.c_str()), 0);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+}
+
+// shade a mesh
+void shade_mesh(Mesh* mesh, int time, bool wireframe, bool skinning_gpu, bool draw_normals, ShadeState* state) {
+    // bind material kd, ks, n
+    glUniform3fv(glGetUniformLocation(state->gl_program_id,"material_kd"),
+                 1,&mesh->mat->kd.x);
+    glUniform3fv(glGetUniformLocation(state->gl_program_id,"material_ks"),
+                 1,&mesh->mat->ks.x);
+    glUniform1f(glGetUniformLocation(state->gl_program_id,"material_n"),
+                mesh->mat->n);
+    glUniform1i(glGetUniformLocation(state->gl_program_id,"material_is_lines"),
+                GL_FALSE);
+    glUniform1i(glGetUniformLocation(state->gl_program_id,"material_double_sided"),
+                (mesh->mat->double_sided)?GL_TRUE:GL_FALSE);
+    // bind texture params (txt_on, sampler)
+    _bind_texture("material_kd_txt", "material_kd_txt_on", mesh->mat->kd_txt, 0, state);
+    _bind_texture("material_ks_txt", "material_ks_txt_on", mesh->mat->ks_txt, 1, state);
+    _bind_texture("material_norm_txt", "material_norm_txt_on", mesh->mat->norm_txt, 2, state);
+    
+    // bind mesh frame - use frame_to_matrix
+    glUniformMatrix4fv(glGetUniformLocation(state->gl_program_id,"mesh_frame"),
+                       1,true,&frame_to_matrix(mesh->frame)[0][0]);
+    
+    // enable vertex attributes arrays and set up pointers to the mesh data
+    auto vertex_pos_location = glGetAttribLocation(state->gl_program_id, "vertex_pos");
+    auto vertex_norm_location = glGetAttribLocation(state->gl_program_id, "vertex_norm");
+    auto vertex_texcoord_location = glGetAttribLocation(state->gl_program_id, "vertex_texcoord");
+    // YOUR CODE GOES HERE ---------------------
+    // (only for extra credit)
+    
+    glEnableVertexAttribArray(vertex_pos_location);
+    glVertexAttribPointer(vertex_pos_location, 3, GL_FLOAT, GL_FALSE, 0, &mesh->pos[0].x);
+    glEnableVertexAttribArray(vertex_norm_location);
+    glVertexAttribPointer(vertex_norm_location, 3, GL_FLOAT, GL_FALSE, 0, &mesh->norm[0].x);
+    if(not mesh->texcoord.empty()) {
+        glEnableVertexAttribArray(vertex_texcoord_location);
+        glVertexAttribPointer(vertex_texcoord_location, 2, GL_FLOAT, GL_FALSE, 0, &mesh->texcoord[0].x);
+    }
+    else glVertexAttrib2f(vertex_texcoord_location, 0, 0);
+    
+    if (mesh->skinning and skinning_gpu) {
+        // YOUR CODE GOES HERE ---------------------
+        // (only for extra credit)
+    } else {
+        glUniform1i(glGetUniformLocation(state->gl_program_id,"skinning->enabled"),GL_FALSE);
+    }
+    
+    // draw triangles and quads
+    if(not wireframe) {
+        if(mesh->triangle.size()) glDrawElements(GL_TRIANGLES, mesh->triangle.size()*3, GL_UNSIGNED_INT, &mesh->triangle[0].x);
+        if(mesh->quad.size()) glDrawElements(GL_QUADS, mesh->quad.size()*4, GL_UNSIGNED_INT, &mesh->quad[0].x);
+        if(mesh->point.size()) glDrawElements(GL_POINTS, mesh->point.size(), GL_UNSIGNED_INT, &mesh->point[0]);
+        if(mesh->line.size()) glDrawElements(GL_LINES, mesh->line.size(), GL_UNSIGNED_INT, &mesh->line[0].x);
+        for(auto segment : mesh->spline) glDrawElements(GL_LINE_STRIP, 4, GL_UNSIGNED_INT, &segment);
+    } else {
+        auto edges = EdgeMap(mesh->triangle, mesh->quad).edges();
+        glDrawElements(GL_LINES, edges.size()*2, GL_UNSIGNED_INT, &edges[0].x);
+    }
+    
+    // disable vertex attribute arrays
+    glDisableVertexAttribArray(vertex_pos_location);
+    glDisableVertexAttribArray(vertex_norm_location);
+    if(not mesh->texcoord.empty()) glDisableVertexAttribArray(vertex_texcoord_location);
+    if(mesh->skinning) {
+        // YOUR CODE GOES HERE ---------------------
+        // (only for extra credit)
+    }
+    
+    // draw normals if needed
+    if(draw_normals) {
+        glUniform3fv(glGetUniformLocation(state->gl_program_id,"material_kd"),
+                     1,&zero3f.x);
+        glUniform3fv(glGetUniformLocation(state->gl_program_id,"material_ks"),
+                     1,&zero3f.x);
+        glBegin(GL_LINES);
+        for(auto i : range(mesh->pos.size())) {
+            auto p0 = mesh->pos[i];
+            auto p1 = mesh->pos[i] + mesh->norm[i]*0.1;
+            glVertexAttrib3fv(0,&p0.x);
+            glVertexAttrib3fv(0,&p1.x);
+            if(mesh->mat->double_sided) {
+                auto p2 = mesh->pos[i] - mesh->norm[i]*0.1;
+                glVertexAttrib3fv(0,&p0.x);
+                glVertexAttrib3fv(0,&p2.x);
+            }
+        }
+        glEnd();
     }
 }
 
@@ -172,64 +248,20 @@ void shade(Scene* scene, ShadeState* state) {
     
     // foreach mesh
     for(auto mesh : scene->meshes) {
-        // bind material kd, ks, n
-        glUniform3fv(glGetUniformLocation(state->gl_program_id,"material_kd"),
-                     1,&mesh->mat->kd.x);
-        glUniform3fv(glGetUniformLocation(state->gl_program_id,"material_ks"),
-                     1,&mesh->mat->ks.x);
-        glUniform1f(glGetUniformLocation(state->gl_program_id,"material_n"),
-                    mesh->mat->n);
-        // YOUR CODE GOES HERE ---------------------
-        // bind texture params (txt_on, sampler)
-        _bind_texture("material_kd_txt", "material_kd_txt_on", mesh->mat->kd_txt, 0, state);
-        _bind_texture("material_ks_txt", "material_ks_txt_on", mesh->mat->ks_txt, 1, state);
-        _bind_texture("material_norm_txt", "material_norm_txt_on", mesh->mat->norm_txt, 2, state);
-        
-        // bind mesh frame - use frame_to_matrix
-        glUniformMatrix4fv(glGetUniformLocation(state->gl_program_id,"mesh_frame"),
-                           1,true,&frame_to_matrix(mesh->frame)[0][0]);
+        // draw mesh
+        shade_mesh(mesh, scene->animation->time, scene->draw_wireframe, scene->animation->gpu_skinning, scene->draw_normals, state);
+    }
     
-        // enable vertex attributes arrays and set up pointers to the mesh data
-        auto vertex_pos_location = glGetAttribLocation(state->gl_program_id, "vertex_pos");
-        auto vertex_norm_location = glGetAttribLocation(state->gl_program_id, "vertex_norm");
-        // YOUR CODE GOES HERE ---------------------
-        auto vertex_texcoord_location = glGetAttribLocation(state->gl_program_id, "vertex_texcoord");
-
-        glEnableVertexAttribArray(vertex_pos_location);
-        glVertexAttribPointer(vertex_pos_location, 3, GL_FLOAT, GL_FALSE, 0, &mesh->pos[0].x);
-        glEnableVertexAttribArray(vertex_norm_location);
-        glVertexAttribPointer(vertex_norm_location, 3, GL_FLOAT, GL_FALSE, 0, &mesh->norm[0].x);
-        // YOUR CODE GOES HERE ---------------------
-        if (!mesh->texcoord.empty()) {
-            glEnableVertexAttribArray(vertex_texcoord_location);
-            glVertexAttribPointer(vertex_texcoord_location, 2, GL_FLOAT, GL_FALSE, 0, &mesh->texcoord[0].x);
-        }
-        // draw triangles and quads
-        if(not scene->draw_wireframe) {
-            if(mesh->triangle.size()) glDrawElements(GL_TRIANGLES, mesh->triangle.size()*3, GL_UNSIGNED_INT, &mesh->triangle[0].x);
-            if(mesh->quad.size()) glDrawElements(GL_QUADS, mesh->quad.size()*4, GL_UNSIGNED_INT, &mesh->quad[0].x);
-        } else {
-            auto edges = EdgeMap(mesh->triangle, mesh->quad).edges();
-            glDrawElements(GL_LINES, edges.size()*2, GL_UNSIGNED_INT, &edges[0].x);
-        }
-        
-        // draw line sets
-        if(not mesh->line.empty()) glDrawElements(GL_LINES, mesh->line.size()*2, GL_UNSIGNED_INT, mesh->line.data());
-        for(auto segment : mesh->spline) glDrawElements(GL_LINE_STRIP, 4, GL_UNSIGNED_INT, &segment);
-        
-        // disable vertex attribute arrays
-        glDisableVertexAttribArray(vertex_pos_location);
-        glDisableVertexAttribArray(vertex_norm_location);
-        // YOUR CODE GOES HERE ---------------------
-        if (!mesh->texcoord.empty()) {
-            glDisableVertexAttribArray(vertex_texcoord_location);
-        }
+    // foreach surface
+    for(auto surface : scene->surfaces) {
+        // draw display mesh
+        shade_mesh(surface->_display_mesh, scene->animation->time, scene->draw_wireframe, scene->animation->gpu_skinning, scene->draw_normals, state);
     }
 }
 
 string scene_filename;          // scene filename
 string image_filename;          // image filename
-Scene* scene;                   // scene arrays
+Scene* scene;                   // scene
 
 // uiloop
 void uiloop() {
@@ -241,23 +273,23 @@ void uiloop() {
     
     // glfwWindowHint(GLFW_SAMPLES, scene->image_samples*scene->image_samples);
 
-    auto window = glfwCreateWindow(scene->image_width,
-                                   scene->image_height,
-                                   "graphics14 | model", NULL, NULL);
+    auto window = glfwCreateWindow(scene->image_width, scene->image_height,
+                                   "graphics13 | animate", NULL, NULL);
     error_if_not(window, "glfw window error");
     
     glfwMakeContextCurrent(window);
     
     glfwSetCharCallback(window, [](GLFWwindow* window, unsigned int key) {
         switch (key) {
-            case 's':
-                scene->draw_captureimage = true;
-                break;
-            case 'w':
-                scene->draw_wireframe = not scene->draw_wireframe;
-                break;
+            case 's': scene->draw_captureimage = true; break;
+            case ' ': scene->draw_animated = not scene->draw_animated; break;
+            case '.': animate_update(scene); break;
+            case 'g': scene->animation->gpu_skinning = not scene->animation->gpu_skinning; animate_reset(scene); break;
+            case 'n': scene->draw_normals = not scene->draw_normals; break;
+            case 'w': scene->draw_wireframe = not scene->draw_wireframe; break;
         }
     });
+    
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     
 #ifdef _WIN32
@@ -269,10 +301,24 @@ void uiloop() {
     init_shaders(state);
     init_textures(scene,state);
     
+    animate_reset(scene);
+    
     auto mouse_last_x = -1.0;
     auto mouse_last_y = -1.0;
     
+    auto last_update_time = glfwGetTime();
+    
     while(not glfwWindowShouldClose(window)) {
+        auto title = tostring("graphics14 | animate | %03d", scene->animation->time);
+        glfwSetWindowTitle(window, title.c_str());
+
+        if(scene->draw_animated) {
+            if(glfwGetTime() - last_update_time > scene->animation->dt) {
+                last_update_time = glfwGetTime();
+                animate_update(scene);
+            }
+        }
+        
         glfwGetFramebufferSize(window, &scene->image_width, &scene->image_height);
         scene->camera->width = (scene->camera->height * scene->image_width) / scene->image_height;
         
@@ -311,7 +357,7 @@ void uiloop() {
 // main function
 int main(int argc, char** argv) {
     auto args = parse_cmdline(argc, argv,
-        { "03_model", "raytrace a scene",
+        { "04_animate", "raytrace a scene",
             {  {"resolution", "r", "image resolution", "int", true, jsonvalue() }  },
             {  {"scene_filename", "", "scene filename", "string", false, jsonvalue("scene.json")},
                {"image_filename", "", "image filename", "string", true, jsonvalue("")}  }
@@ -325,7 +371,7 @@ int main(int argc, char** argv) {
         scene->image_height = args.object_element("resolution").as_int();
         scene->image_width = scene->camera->width * scene->image_height / scene->camera->height;
     }
+    animate_reset(scene);
     subdivide(scene);
     uiloop();
 }
-
