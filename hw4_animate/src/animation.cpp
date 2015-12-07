@@ -45,35 +45,36 @@ void animate_frame(Scene* scene) {
 
 // skinning scene
 void animate_skin(Scene* scene) {
-    // YOUR CODE GOES HERE ---------------------
-    // foreach mesh
-    for (Mesh* mesh: scene->meshes) {
-        // if no skinning, continue
-        if (mesh->skinning != nullptr){
-            // foreach vertex index
-            for (int i: range(mesh->pos.size())){
-                // set pos/norm to zero
-                mesh->pos[i] = zero3f;
-                mesh->norm[i] = zero3f;
-                // for each bone slot (0..3)
-                for(int j: range(4)){
-                    // get bone weight and index
-                    int index = mesh->skinning->bone_ids[i][j];
-                    int weight = mesh->skinning->bone_weights[i][j];
-                    // if index < 0, continue
-                    if (index >= 0) {
-                        // grab bone xform
-                        mat4f bone_xform = mesh->skinning->bone_xforms[scene->animation->time][index];
-                        // update position and normal
-                        mesh->pos[i] = weight * transform_point(bone_xform, mesh->skinning->rest_pos[i]);
-                        mesh->norm[i] = weight * transform_normal(bone_xform, mesh->skinning->rest_norm[i]);
-                    }
-                }
-                // normalize normal
-                mesh->norm[i] = normalize(mesh->norm[i]);
-            }
+	// YOUR CODE GOES HERE ---------------------
+	// foreach mesh
+	for (auto mesh : scene->meshes) {
+		// if no skinning, continue
+        if (mesh->skinning == nullptr){
+            continue;
         }
-    }
+		// foreach vertex index
+        for (int i: range(mesh->pos.size())) {
+			// set pos/norm to zero
+			mesh->pos[i] = zero3f;
+            mesh->norm[i] = zero3f;
+			// for each bone slot (0..3)
+            for (int j: range(4)) {
+				// get bone weight and index
+                vec4i indices = mesh->skinning->bone_ids[i];
+				vec4f weights = mesh->skinning->bone_weights[i];
+				// if index < 0, continue
+				if (indices[j] >= 0) {
+					// grab bone xform
+					mat4f bone_xform = mesh->skinning->bone_xforms[scene->animation->time][indices[j]];
+					// update position and normal
+					mesh->pos[i] += weights[j] * transform_point(bone_xform, mesh->skinning->rest_pos[i]);
+					mesh->norm[i] += weights[j] * transform_normal(bone_xform, mesh->skinning->rest_norm[i]);
+				}
+			}
+			// normalize normal
+			mesh->norm[i] = normalize(mesh->norm[i]);
+		}
+	}
 }
 
 // particle simulation
