@@ -8,13 +8,61 @@ using std::thread;
 // lookup texture value
 vec3f lookup_scaled_texture(vec3f value, image3f* texture, vec2f uv, bool tile = false) {
     // YOUR CODE GOES HERE ----------------------
-    return value; // placeholder
+    if (texture == nullptr) {
+        return value; // placeholder
+    }
+    int i = (int) uv.x * texture->width();
+    float s = uv.x * texture->width() - i;
+    int i1 = i + 1;
+    
+    int j = (int) uv.y * texture->height();
+    float t = uv.y * texture->height() - j;
+    int j1 = j + 1;
+    
+    if (tile) {
+        i %= texture->width();
+        i1 %= texture->width();
+        if (i < 0) {
+            i += texture->width();
+        }
+        if (i1 < 0) {
+            i1 += texture->width();
+        }
+        
+        j %= texture->height();
+        j1 %= texture->height();
+        if (j < 0) {
+            j += texture->height();
+        }
+        if(j1 < 0) {
+            j += texture->height();
+        }
+    }
+    else {
+        i = clamp(i, 0, texture->width()-1);
+        i1 = clamp(i1, 0, texture->width()-1);
+        j = clamp(j, 0, texture->height()-1);
+        j1 = clamp(j1, 0, texture->height()-1);
+    }
+    return texture->at(i, j) * (1 - s) * (1 - t) +
+           texture->at(i, j1) * (1 - s) * t +
+           texture->at(i1, j) * s * (1 - t) +
+           texture->at(i1, j1) * s * t;
 }
 
 // compute the brdf
 vec3f eval_brdf(vec3f kd, vec3f ks, float n, vec3f v, vec3f l, vec3f norm, bool microfacet) {
     // YOUR CODE GOES HERE ----------------------
     auto h = normalize(v+l); // placeholder (non-microfacet model)
+    if (microfacet){
+        float d = ((n + 2) / (2 * pif)) * pow(max(0.0f, dot(h, norm)), n);
+        vec3f f = ks + (one3f - ks) * pow(1 - dot(h, l), 5);
+        float g = min(1.0f,
+                      min(2 * dot(h, norm) * dot(v, norm) / dot(v, h),
+                          2 * dot(h, norm) * dot(l, norm) / dot(l, h)));
+        
+        return d * g * f / (4 * dot(l, norm) * dot(v, norm));
+    }
     return kd/pif + ks*(n+8)/(8*pif) * pow(max(0.0f,dot(norm,h)),n); // placeholder (non-microfacet model)
 }
 
@@ -22,7 +70,10 @@ vec3f eval_brdf(vec3f kd, vec3f ks, float n, vec3f v, vec3f l, vec3f norm, bool 
 vec3f eval_env(vec3f ke, image3f* ke_txt, vec3f dir) {
     // YOUR CODE GOES HERE ----------------------
     if(not ke_txt) return zero3f;
-    else return one3f;
+    
+    float u = atan2(dir.x, dir.z) / (2 * pif);
+    float v = 1 - acos(dir.y) / pif;
+    return lookup_scaled_texture(ke, ke_txt, vec2f(u, v), true);
 }
 
 // pick a direction according to the cosine (returns direction and its pdf)
@@ -79,11 +130,19 @@ vec3f pathtrace_ray(Scene* scene, ray3f ray, Rng* rng, int depth) {
     auto n = intersection.mat->n;
     auto mf = intersection.mat->microfacet;
     
+    vec2f uv = intersection.texcoord;
+    ke = lookup_scaled_texture(ke, intersection.mat->ke_txt, uv);
+    kd = lookup_scaled_texture(kd, intersection.mat->kd_txt, uv);
+    ks = lookup_scaled_texture(ks, intersection.mat->ks_txt, uv);
+    norm = lookup_scaled_texture(norm, intersection.mat->norm_txt, uv);
     // accumulate color starting with ambient
     auto c = scene->ambient * kd;
     
     // add emission if on the first bounce
     // YOUR CODE GOES HERE ----------------------
+    if (depth == 0) {
+        c += ke;
+    }
     
     // foreach point light
     for(auto light : scene->lights) {
@@ -109,43 +168,92 @@ vec3f pathtrace_ray(Scene* scene, ray3f ray, Rng* rng, int depth) {
     
     // YOUR AREA LIGHT CODE GOES HERE ----------------------
     // foreach surface
+    for (Surface* surface: scene->surfaces) {
         // skip if no emission from surface
+        if (surface->mat->ke == zero3f) {
+            continue;
+        }
         // pick a point on the surface, grabbing normal, area and texcoord
+        vec3f S;
+        vec3f Nl;
         // check if quad
+        if (surface->isquad){
             // generate a 2d random number
+            vec2f random_uv = rng->next_vec2f();
             // compute light position, normal, area
+            S = transform_point(surface->frame, 2.0f * surface->radius * vec3f(random_uv.x - 0.5f, random_uv.y - 0.5f, 0.0f));
+            Nl = transform_normal(surface->frame, vec3f(0.0f, 0.0f, 1.0f));
             // set tex coords as random value got before
+            intersection.texcoord = random_uv;
+        }
         // else
             // generate a 2d random number
             // compute light position, normal, area
             // set tex coords as random value got before
+        
         // get light emission from material and texture
+        vec3f kel = lookup_scaled_texture(surface->mat->ke, surface->mat->ke_txt, intersection.texcoord);
         // compute light direction
+        vec3f l = normalize(S - pos);
         // compute light response
+        vec3f Cl = kel * 4 * pow(surface->radius, 2) * max(0.0f, -dot(Nl, l)) / lengthSqr(S - pos);
         // compute the material response (brdf*cos)
+        vec3f mat_resp = max(dot(norm, l), 0.0f) * eval_brdf(kd, ks, n, v, l, norm, mf);
         // multiply brdf and light
+        vec3f shade = mat_resp * Cl;
         // check for shadows and accumulate if needed
+        if (shade == zero3f) {
+            continue;
+        }
         // if shadows are enabled
+        if (scene->path_shadows) {
             // perform a shadow check and accumulate
-        // else
-            // else just accumulate
-    
+            if (!intersect_shadow(scene, ray3f::make_segment(pos, S))){
+                c += shade;
+            }
+            // else
+        }
+        // else just accumulate
+        else {
+            c += shade;
+        }
+    }
     // YOUR ENVIRONMENT LIGHT CODE GOES HERE ----------------------
     // sample the brdf for environment illumination if the environment is there
+    if (scene->background_txt!=nullptr) {
         // pick direction and pdf
+        vec2f random_dir = rng->next_vec2f();
+        pair<vec3f,float> pdf = sample_brdf(kd, ks, n, v, norm, random_dir, rng->next_float());
         // compute the material response (brdf*cos)
+        vec3f mat_resp = max(0.0f, dot(norm, pdf.first)) * eval_brdf(kd, ks, n, v, pdf.first, norm, mf);
         // accumulate recersively scaled by brdf*cos/pdf
-            // if shadows are enabled
-                // perform a shadow check and accumulate
+        vec3f cl = eval_env(scene->background, scene->background_txt, pdf.first) / pdf.second;
+        vec3f shade = mat_resp * cl;
+        // if shadows are enabled
+        if (scene->path_shadows){
+            // perform a shadow check and accumulate
+            if (!intersect_shadow(scene, ray3f(pos, pdf.first))){
+                c += shade;
+            }
             // else
-                // else just accumulate
-
+        }
+        // else just accumulate
+        else{
+            c += shade;
+        }
+    }
     // YOUR INDIRECT ILLUMINATION CODE GOES HERE ----------------------
     // sample the brdf for indirect illumination
+    if (depth < scene->path_max_depth){
         // pick direction and pdf
+        vec2f random_dir = rng->next_vec2f();
+        pair<vec3f,float> pdf = sample_brdf(kd, ks, n, v, norm, random_dir, rng->next_float());
         // compute the material response (brdf*cos)
+        vec3f mat_resp = max(0.0f, dot(norm, pdf.first)) * eval_brdf(kd, ks, n, v, pdf.first, norm, mf);
         // accumulate recersively scaled by brdf*cos/pdf
-    
+        ray3f new_ray = ray3f(pos, pdf.first);
+        c += pathtrace_ray(scene, new_ray, rng, depth + 1) * (mat_resp / pdf.second);
+    }
     // return the accumulated color
     return c;
 }
